@@ -76,7 +76,181 @@ import { Server } from "socket.io";
 ```
 
   </TabItem>
-</Tabs>
+</Tabs>const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
 
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
 
-Ready? Click "Next" to get started.
+let players = {};
+
+app.get("/", (req, res) => {
+res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+<title>3D GTA Mini</title>
+<style>body { margin:0; overflow:hidden; }</style>
+</head>
+<body>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+
+<script>
+const socket = io();
+
+// === THREE SETUP ===
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer();
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// Licht
+const light = new THREE.DirectionalLight(0xffffff, 1);
+light.position.set(10,20,10);
+scene.add(light);
+
+// grond
+const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(2000,2000),
+    new THREE.MeshStandardMaterial({color:0x228B22})
+);
+ground.rotation.x = -Math.PI/2;
+scene.add(ground);
+
+// spelers
+let players = {};
+let meshes = {};
+
+// maak speler
+function createPlayer(id){
+    const geo = new THREE.BoxGeometry(2,4,2);
+    const mat = new THREE.MeshStandardMaterial({
+        color: id === socket.id ? 0xff0000 : 0x0000ff
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    scene.add(mesh);
+    meshes[id] = mesh;
+}
+
+// stad genereren
+for(let i=0;i<200;i++){
+    const building = new THREE.Mesh(
+        new THREE.BoxGeometry(
+            5 + Math.random()*10,
+            10 + Math.random()*50,
+            5 + Math.random()*10
+        ),
+        new THREE.MeshStandardMaterial({color:0x888888})
+    );
+
+    building.position.x = (Math.random()-0.5)*1000;
+    building.position.z = (Math.random()-0.5)*1000;
+    building.position.y = building.geometry.parameters.height/2;
+
+    scene.add(building);
+}
+
+// sockets
+socket.on("currentPlayers", data=>{
+    players = data;
+    for(let id in players){
+        createPlayer(id);
+    }
+});
+
+socket.on("newPlayer", data=>{
+    players[data.id] = data.player;
+    createPlayer(data.id);
+});
+
+socket.on("updatePlayers", data=>{
+    players = data;
+});
+
+// movement
+let keys = {};
+document.addEventListener("keydown", e=> keys[e.key]=true);
+document.addEventListener("keyup", e=> keys[e.key]=false);
+
+function update(){
+    let move = {x:0, z:0};
+
+    if(keys["w"]) move.z -= 0.5;
+    if(keys["s"]) move.z += 0.5;
+    if(keys["a"]) move.x -= 0.5;
+    if(keys["d"]) move.x += 0.5;
+
+    socket.emit("move", move);
+}
+
+// render loop
+function animate(){
+    requestAnimationFrame(animate);
+
+    update();
+
+    for(let id in players){
+        let p = players[id];
+        if(meshes[id]){
+            meshes[id].position.set(p.x,2,p.z);
+        }
+    }
+
+    // camera volgt speler
+    if(meshes[socket.id]){
+        let me = meshes[socket.id];
+        camera.position.x = me.position.x + 10;
+        camera.position.y = me.position.y + 10;
+        camera.position.z = me.position.z + 10;
+        camera.lookAt(me.position);
+    }
+
+    renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
+`);
+});
+
+// socket server
+io.on("connection", socket=>{
+    players[socket.id] = {
+        x: Math.random()*50,
+        z: Math.random()*50
+    };
+
+    socket.emit("currentPlayers", players);
+    socket.broadcast.emit("newPlayer", {
+        id: socket.id,
+        player: players[socket.id]
+    });
+
+    socket.on("move", data=>{
+        if(players[socket.id]){
+            players[socket.id].x += data.x;
+            players[socket.id].z += data.z;
+        }
+        io.emit("updatePlayers", players);
+    });
+
+    socket.on("disconnect", ()=>{
+        delete players[socket.id];
+        io.emit("updatePlayers", players);
+    });
+});
+
+server.listen(3000, ()=>{
+    console.log("👉 http://localhost:3000");
+});
+
+Ready? Click "Next" to g
+et started.
